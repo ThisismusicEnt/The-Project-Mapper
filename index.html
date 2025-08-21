@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Professional Project Mapper</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        @property --angle {
+          syntax: '<angle>';
+          initial-value: 0deg;
+          inherits: false;
+        }
+
+        :root {
+            --angle: 0deg;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0a0a0a;
+            color: #e5e7eb;
+            overflow: hidden;
+        }
+
+        .glow-border {
+            position: fixed;
+            inset: 0;
+            padding: 2px;
+            background: conic-gradient(from var(--angle), #0d0d0d, #1a1a1a, #6366f1, #a855f7, #ec4899, #6366f1, #1a1a1a, #0d0d0d);
+            animation: rotate 20s linear infinite;
+            z-index: -1;
+        }
+
+        @keyframes rotate {
+          to { --angle: 360deg; }
+        }
+
+        #app-container {
+            background-color: #0a0a0a;
+            background-image: radial-gradient(#1a1a1a 1px, transparent 1px);
+            background-size: 16px 16px;
+        }
+
+        .ui-panel {
+            background: rgba(20, 20, 20, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+
+        .node-box {
+            background: rgba(30, 30, 30, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+            transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+            transform: scale(1);
+            /* Dusted glass effect */
+            background-image: url('data:image/svg+xml,%3Csvg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"%3E%3Cfilter id="noise"%3E%3CfeTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="4" stitchTiles="stitch"/%3E%3C/filter%3E%3Crect width="100%" height="100%" filter="url(%23noise)" opacity="0.03"/%3E%3C/svg%3E');
+        }
+        .node-box:hover {
+            box-shadow: 0 0 20px rgba(79, 70, 229, 0.4);
+        }
+        .connector-point {
+            width: 14px; height: 14px; background-color: #1a1a1a; border: 2px solid #4f46e5; border-radius: 50%; position: absolute; cursor: crosshair; transition: all 0.2s ease; z-index: 10;
+        }
+        .connector-point:hover { transform: scale(1.5); background-color: #6366f1; }
+        .connector-point.top { top: -7px; left: 50%; transform: translateX(-50%); }
+        .connector-point.bottom { bottom: -7px; left: 50%; transform: translateX(-50%); }
+        .connector-point.left { left: -7px; top: 50%; transform: translateY(-50%); }
+        .connector-point.right { right: -7px; top: 50%; transform: translateY(-50%); }
+
+        .content-container iframe, .content-container img { pointer-events: none; }
+        
+        .connector-path { stroke: url(#wireGradient); stroke-width: 2.5px; fill: none; stroke-linecap: round; cursor: pointer; transition: stroke-width 0.2s ease, filter 0.2s ease; }
+        .connector-path.selected { stroke-width: 4px; filter: drop-shadow(0 0 3px #a855f7); }
+        .connector-path-temp { stroke: #a855f7; stroke-width: 2.5px; fill: none; stroke-dasharray: 5 5; stroke-linecap: round; }
+
+        .toast { animation: fadeInOut 3s ease-in-out forwards; }
+        @keyframes fadeInOut {
+            0%, 100% { opacity: 0; transform: translateY(20px); }
+            10%, 90% { opacity: 1; transform: translateY(0); }
+        }
+        #sidebar { transition: transform 0.3s ease-in-out; }
+    </style>
+</head>
+<body class="w-screen h-screen">
+    <div class="glow-border"></div>
+    <div id="app-container" class="relative w-full h-full">
+
+        <!-- Sidebar -->
+        <div id="sidebar" class="absolute top-0 left-0 h-full w-64 ui-panel z-30 transform -translate-x-full">
+            <div class="p-4 flex flex-col h-full">
+                <h2 class="text-xl font-bold mb-4">Projects</h2>
+                <ul id="project-list" class="flex-grow overflow-y-auto">
+                    <!-- Project items will be injected here -->
+                </ul>
+            </div>
+        </div>
+        <button id="sidebar-toggle" class="absolute top-4 left-4 z-40 p-2 text-gray-300 hover:text-white hover:bg-white/10 rounded-md transition">
+            <i data-lucide="menu"></i>
+        </button>
+
+        <!-- Main Canvas -->
+        <div id="canvas" class="relative w-full h-full overflow-hidden">
+            <svg id="connector-svg" class="absolute top-0 left-0 w-full h-full pointer-events-none">
+                <defs>
+                    <linearGradient id="wireGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" style="stop-color:#4f46e5;stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:#a855f7;stop-opacity:1" />
+                    </linearGradient>
+                </defs>
+            </svg>
+            <div id="project-title" class="absolute bottom-4 left-1/2 -translate-x-1/2 text-gray-400 text-lg font-semibold">Unsaved Project</div>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 p-2 rounded-lg ui-panel">
+            <button id="new-btn" class="p-2 text-gray-300 hover:text-white hover:bg-white/10 rounded-md transition" title="New Project"><i data-lucide="file-plus-2"></i></button>
+            <button id="save-btn" class="p-2 text-gray-300 hover:text-white hover:bg-white/10 rounded-md transition" title="Save Project"><i data-lucide="save"></i></button>
+            <div class="w-px h-6 bg-white/20 mx-2"></div>
+            <button id="add-box-btn" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-semibold transition flex items-center gap-2">
+                <i data-lucide="plus-circle" class="w-5 h-5"></i> Add Node
+            </button>
+        </div>
+
+        <!-- Modals -->
+        <div id="content-modal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/70">
+            <div class="ui-panel rounded-lg p-8 w-full max-w-md">
+                <h2 class="text-2xl font-bold mb-6 text-center">Add Content</h2>
+                <div class="grid grid-cols-2 gap-4">
+                    <button data-type="text" class="content-type-btn p-4 bg-indigo-600 hover:bg-indigo-700 rounded-lg transition flex items-center justify-center gap-2"><i data-lucide="type"></i>Text</button>
+                    <button data-type="link" class="content-type-btn p-4 bg-purple-600 hover:bg-purple-700 rounded-lg transition flex items-center justify-center gap-2"><i data-lucide="link"></i>Link</button>
+                    <button data-type="image" class="content-type-btn p-4 bg-pink-600 hover:bg-pink-700 rounded-lg transition flex items-center justify-center gap-2"><i data-lucide="image"></i>Image URL</button>
+                    <button data-type="video" class="content-type-btn p-4 bg-teal-600 hover:bg-teal-700 rounded-lg transition flex items-center justify-center gap-2"><i data-lucide="youtube"></i>Video Embed</button>
+                </div>
+                <button id="close-content-modal-btn" class="mt-6 w-full py-2 bg-gray-600 hover:bg-gray-700 rounded-lg transition">Cancel</button>
+            </div>
+        </div>
+        
+        <div id="input-modal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/70">
+            <div class="ui-panel rounded-lg p-8 w-full max-w-md">
+                <h2 id="input-modal-title" class="text-2xl font-bold mb-4 text-center">Input</h2>
+                <input id="input-modal-field" type="text" class="w-full bg-gray-900/50 border border-white/20 rounded-md p-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <div class="flex gap-4 mt-6">
+                    <button id="input-modal-cancel" class="w-full py-2 bg-gray-600 hover:bg-gray-700 rounded-lg transition">Cancel</button>
+                    <button id="input-modal-submit" class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg transition">Submit</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="color-palette-modal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/70">
+             <div class="ui-panel rounded-lg p-6 w-full max-w-xs">
+                <h2 class="text-xl font-bold mb-4 text-center">Set Border Color</h2>
+                <div id="color-grid" class="grid grid-cols-5 gap-3"></div>
+                <button id="close-color-modal-btn" class="mt-6 w-full py-2 bg-gray-600 hover:bg-gray-700 rounded-lg transition">Cancel</button>
+            </div>
+        </div>
+
+        <div id="toast-container" class="fixed bottom-5 right-5 z-50"></div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- Setup ---
+            lucide.createIcons();
+            const canvas = document.getElementById('canvas');
+            const connectorSvg = document.getElementById('connector-svg');
+            
+            // --- State ---
+            let boxes = [], connectors = [], nextBoxId = 0, activeBoxForContent = null, isDragging = false, dragTarget = null, offset = { x: 0, y: 0 }, mousePos = { x: 0, y: 0 }, animationFrameId = null, isConnecting = false, startConnector = null, tempLine = null, selectedConnector = null, activeBoxForColor = null, currentProjectName = null;
+
+            // --- UI Elements ---
+            const addBoxBtn = document.getElementById('add-box-btn');
+            const newBtn = document.getElementById('new-btn');
+            const saveBtn = document.getElementById('save-btn');
+            const sidebar = document.getElementById('sidebar');
+            const sidebarToggle = document.getElementById('sidebar-toggle');
+            const projectList = document.getElementById('project-list');
+            const projectTitle = document.getElementById('project-title');
+            
+            const contentModal = document.getElementById('content-modal');
+            const closeContentModalBtn = document.getElementById('close-content-modal-btn');
+            
+            const inputModal = document.getElementById('input-modal');
+            const inputModalTitle = document.getElementById('input-modal-title');
+            const inputModalField = document.getElementById('input-modal-field');
+            const inputModalCancel = document.getElementById('input-modal-cancel');
+            const inputModalSubmit = document.getElementById('input-modal-submit');
+
+            const colorPaletteModal = document.getElementById('color-palette-modal');
+            const colorGrid = document.getElementById('color-grid');
+            const closeColorModalBtn = document.getElementById('close-color-modal-btn');
+
+            // --- Animation Loop for Smoother Dragging ---
+            function animationLoop() {
+                if (isDragging && dragTarget) {
+                    const boxData = boxes.find(b => b.element === dragTarget);
+                    if (boxData) {
+                        const canvasRect = canvas.getBoundingClientRect();
+                        let targetX = mousePos.x - canvasRect.left - offset.x;
+                        let targetY = mousePos.y - canvasRect.top - offset.y;
+
+                        // Clamp to canvas bounds
+                        targetX = Math.max(0, Math.min(targetX, canvas.clientWidth - dragTarget.offsetWidth));
+                        targetY = Math.max(0, Math.min(targetY, canvas.clientHeight - dragTarget.offsetHeight));
+
+                        // Fluid movement using linear interpolation (lerp)
+                        const easeFactor = 0.2;
+                        boxData.x += (targetX - boxData.x) * easeFactor;
+                        boxData.y += (targetY - boxData.y) * easeFactor;
+
+                        dragTarget.style.left = `${boxData.x}px`;
+                        dragTarget.style.top = `${boxData.y}px`;
+                        updateAllConnectors();
+                    }
+                }
+
+                if (isConnecting && startConnector && tempLine) {
+                    const startCoords = getConnectorCoordinates(startConnector.boxId, startConnector.point);
+                    const canvasRect = canvas.getBoundingClientRect();
+                    const endCoords = { x: mousePos.x - canvasRect.left, y: mousePos.y - canvasRect.top };
+                    if(startCoords) tempLine.setAttribute('d', calculateCurvePath(startCoords, endCoords, startConnector.point, ''));
+                }
+
+                if (isDragging || isConnecting) animationFrameId = requestAnimationFrame(animationLoop);
+                else { cancelAnimationFrame(animationFrameId); animationFrameId = null; }
+            }
+            function startAnimationLoop() { if (!animationFrameId) animationFrameId = requestAnimationFrame(animationLoop); }
+
+            // --- Box Management ---
+            function createBox(x, y, id = null, contentHTML = null, borderColor = null) {
+                const boxId = id !== null ? id : nextBoxId++;
+                if (id !== null && id >= nextBoxId) nextBoxId = id + 1;
+                
+                const box = document.createElement('div');
+                box.id = `box-${boxId}`;
+                box.className = 'node-box absolute p-4 rounded-lg w-64 min-h-[120px] flex flex-col cursor-grab select-none';
+                box.style.left = `${x}px`;
+                box.style.top = `${y}px`;
+                if (borderColor) box.style.borderColor = borderColor;
+
+                box.innerHTML = `
+                    <div class="flex-grow content-container overflow-y-auto" style="max-height: 200px;">
+                        ${contentHTML || '<div class="content-placeholder text-gray-400 text-center p-4">Click to add content</div>'}
+                    </div>
+                    <div class="absolute top-0 right-0 -mt-3 -mr-3 z-20 flex gap-1">
+                         <button class="color-box-btn w-7 h-7 bg-gray-700 text-white rounded-full flex items-center justify-center hover:bg-gray-600 transition shadow-lg"><i data-lucide="palette" class="w-4 h-4"></i></button>
+                         <button class="delete-box-btn w-7 h-7 bg-red-600 text-white rounded-full flex items-center justify-center hover:bg-red-700 transition shadow-lg"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                    </div>
+                    <div class="connector-point top"></div> <div class="connector-point bottom"></div> <div class="connector-point left"></div> <div class="connector-point right"></div>
+                `;
+
+                canvas.appendChild(box);
+                lucide.createIcons({ nodes: [box.querySelector('.delete-box-btn'), box.querySelector('.color-box-btn')] });
+                // Store position data directly on the object for smoother animation
+                const boxData = { id: boxId, element: box, x: x, y: y };
+                boxes.push(boxData);
+                setupBoxEventListeners(box, boxData);
+                return boxData;
+            }
+            
+            function setupBoxEventListeners(boxElement, boxData) {
+                boxElement.addEventListener('mousedown', (e) => {
+                    if (e.target.closest('.delete-box-btn, .color-box-btn, .connector-point, .content-container')) return;
+                    isDragging = true; 
+                    dragTarget = boxElement; 
+                    dragTarget.classList.add('cursor-grabbing');
+                    // Update internal position before dragging
+                    boxData.x = boxElement.offsetLeft;
+                    boxData.y = boxElement.offsetTop;
+                    offset.x = e.clientX - boxElement.getBoundingClientRect().left;
+                    offset.y = e.clientY - boxElement.getBoundingClientRect().top;
+                    startAnimationLoop();
+                });
+
+                boxElement.querySelector('.delete-box-btn').addEventListener('click', () => deleteBox(boxData.id));
+                boxElement.querySelector('.color-box-btn').addEventListener('click', () => { activeBoxForColor = boxData; colorPaletteModal.classList.remove('hidden'); colorPaletteModal.classList.add('flex'); });
+                boxElement.querySelectorAll('.connector-point').forEach(point => point.addEventListener('mousedown', (e) => { e.stopPropagation(); isConnecting = true; startConnector = { boxId: boxData.id, point: getPointPosition(point) }; tempLine = document.createElementNS('http://www.w3.org/2000/svg', 'path'); tempLine.setAttribute('class', 'connector-path-temp'); connectorSvg.appendChild(tempLine); startAnimationLoop(); }));
+                boxElement.querySelector('.content-container').addEventListener('click', (e) => { if(e.target.classList.contains('content-placeholder') || e.target.classList.contains('content-container')) { activeBoxForContent = boxData; contentModal.classList.remove('hidden'); contentModal.classList.add('flex'); } });
+            }
+
+            function deleteBox(boxId) {
+                const boxIndex = boxes.findIndex(b => b.id === boxId);
+                if (boxIndex > -1) {
+                    boxes[boxIndex].element.remove();
+                    boxes.splice(boxIndex, 1);
+                    connectors = connectors.filter(conn => {
+                        if (conn.start.boxId === boxId || conn.end.boxId === boxId) {
+                            if (selectedConnector === conn) deselectConnector();
+                            conn.path.remove();
+                            return false;
+                        }
+                        return true;
+                    });
+                    updateAllConnectors();
+                }
+            }
+
+            // --- Content & Color Management ---
+            function setupColorPalette() {
+                const colors = ['#FFFFFF', '#ef4444', '#f97316', '#eab308', '#84cc16', '#22c55e', '#14b8a6', '#06b6d4', '#3b82f6', '#8b5cf6', '#d946ef'];
+                colorGrid.innerHTML = '';
+                colors.forEach(color => {
+                    const swatch = document.createElement('button');
+                    swatch.className = 'w-10 h-10 rounded-full cursor-pointer transition transform hover:scale-110';
+                    swatch.style.backgroundColor = color;
+                    swatch.addEventListener('click', () => {
+                        if (activeBoxForColor) {
+                            activeBoxForColor.element.style.borderColor = color;
+                            colorPaletteModal.classList.add('hidden');
+                            colorPaletteModal.classList.remove('flex');
+                            activeBoxForColor = null;
+                        }
+                    });
+                    colorGrid.appendChild(swatch);
+                });
+                const defaultSwatch = document.createElement('button');
+                defaultSwatch.className = 'w-10 h-10 rounded-full cursor-pointer transition transform hover:scale-110 flex items-center justify-center bg-gray-500';
+                defaultSwatch.innerHTML = `<i data-lucide="x" class="w-6 h-6"></i>`;
+                defaultSwatch.addEventListener('click', () => {
+                     if (activeBoxForColor) {
+                        activeBoxForColor.element.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                        colorPaletteModal.classList.add('hidden');
+                        colorPaletteModal.classList.remove('flex');
+                        activeBoxForColor = null;
+                    }
+                });
+                colorGrid.appendChild(defaultSwatch);
+                lucide.createIcons({ nodes: [defaultSwatch] });
+            }
+            closeColorModalBtn.addEventListener('click', () => { colorPaletteModal.classList.add('hidden'); colorPaletteModal.classList.remove('flex'); activeBoxForColor = null; });
+
+            contentModal.querySelectorAll('.content-type-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const type = btn.dataset.type;
+                    if (activeBoxForContent) {
+                        handleContentAddition(activeBoxForContent, type);
+                    }
+                    hideContentModal();
+                });
+            });
+
+            closeContentModalBtn.addEventListener('click', hideContentModal);
+
+            function hideContentModal() {
+                contentModal.classList.add('hidden');
+                contentModal.classList.remove('flex');
+                activeBoxForContent = null;
+            }
+
+            function handleContentAddition(boxData, type) {
+                switch (type) {
+                    case 'text':
+                        const contentContainer = boxData.element.querySelector('.content-container');
+                        contentContainer.innerHTML = '';
+                        const textDiv = document.createElement('div');
+                        textDiv.className = 'content-editable text-white p-1 outline-none min-h-[50px]';
+                        textDiv.contentEditable = true;
+                        textDiv.textContent = 'Start typing...';
+                        contentContainer.appendChild(textDiv);
+                        textDiv.focus();
+                        break;
+                    case 'link':
+                        showInputModal("Enter URL", "https://", (value) => {
+                            if (value) addContentToBox(boxData, `<a href="${value}" target="_blank" class="text-indigo-400 hover:underline break-all">${value}</a>`);
+                        });
+                        break;
+                    case 'image':
+                        showInputModal("Enter Image URL", "", (value) => {
+                            if (value) addContentToBox(boxData, `<img src="${value}" class="w-full h-auto rounded-md object-cover" onerror="this.parentElement.innerHTML = '<p class=\\'text-red-400\\'>Invalid Image URL</p>';">`);
+                        });
+                        break;
+                    case 'video':
+                         showInputModal("Enter YouTube/Vimeo Embed URL", "", (value) => {
+                            if (value) {
+                                const embedUrl = value.includes('youtube.com/watch?v=') ? value.replace("watch?v=", "embed/") : value;
+                                addContentToBox(boxData, `<iframe src="${embedUrl}" class="w-full aspect-video rounded-md" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`);
+                            }
+                        });
+                        break;
+                }
+            }
+            
+            function addContentToBox(boxData, html) {
+                boxData.element.querySelector('.content-container').innerHTML = html;
+            }
+
+            let inputModalCallback = null;
+            function showInputModal(title, placeholder, callback) {
+                inputModalTitle.textContent = title;
+                inputModalField.value = '';
+                inputModalField.placeholder = placeholder;
+                inputModal.classList.remove('hidden');
+                inputModal.classList.add('flex');
+                inputModalField.focus();
+                inputModalCallback = callback;
+            }
+
+            inputModalSubmit.addEventListener('click', () => {
+                if(inputModalCallback) inputModalCallback(inputModalField.value);
+                hideInputModal();
+            });
+            inputModalCancel.addEventListener('click', hideInputModal);
+            function hideInputModal() {
+                inputModal.classList.add('hidden');
+                inputModal.classList.remove('flex');
+                inputModalCallback = null;
+            }
+
+            // --- Connector Management ---
+            function getPointPosition(point) {
+                if (point.classList.contains('top')) return 'top';
+                if (point.classList.contains('bottom')) return 'bottom';
+                if (point.classList.contains('left')) return 'left';
+                if (point.classList.contains('right')) return 'right';
+            }
+
+            function getConnectorCoordinates(boxId, position) {
+                const boxData = boxes.find(b => b.id === boxId);
+                if (!boxData) return null;
+                const rect = boxData.element.getBoundingClientRect();
+                let x = boxData.x;
+                let y = boxData.y;
+                switch (position) {
+                    case 'top': return { x: x + rect.width / 2, y: y };
+                    case 'bottom': return { x: x + rect.width / 2, y: y + rect.height };
+                    case 'left': return { x: x, y: y + rect.height / 2 };
+                    case 'right': return { x: x + rect.width, y: y + rect.height / 2 };
+                }
+            }
+
+            function updateAllConnectors() {
+                connectors.forEach(conn => {
+                    const startCoords = getConnectorCoordinates(conn.start.boxId, conn.start.point);
+                    const endCoords = getConnectorCoordinates(conn.end.boxId, conn.end.point);
+                    if (startCoords && endCoords) {
+                        conn.path.setAttribute('d', calculateCurvePath(startCoords, endCoords, conn.start.point, conn.end.point));
+                    }
+                });
+            }
+            
+            function calculateCurvePath(start, end, startPos, endPos) {
+                const dx = end.x - start.x;
+                const dy = end.y - start.y;
+                let cx1 = start.x, cy1 = start.y, cx2 = end.x, cy2 = end.y;
+                const curveFactor = Math.min(Math.abs(dx), Math.abs(dy)) * 0.5 + 40;
+
+                if (startPos === 'left' || startPos === 'right') cx1 += (startPos === 'left' ? -1 : 1) * curveFactor;
+                else cy1 += (startPos === 'top' ? -1 : 1) * curveFactor;
+                
+                if (endPos === 'left' || endPos === 'right') cx2 += (endPos === 'left' ? 1 : -1) * curveFactor;
+                else cy2 += (endPos === 'top' ? 1 : -1) * curveFactor;
+
+                return `M ${start.x} ${start.y} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${end.x} ${end.y}`;
+            }
+
+            function deselectConnector() {
+                if (selectedConnector) {
+                    selectedConnector.path.classList.remove('selected');
+                    selectedConnector = null;
+                }
+            }
+
+            function createConnector(startConn, endConn) {
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                path.setAttribute('class', 'connector-path');
+                path.style.pointerEvents = 'auto'; // Make path clickable
+                connectorSvg.appendChild(path);
+
+                const connectorData = { start: startConn, end: endConn, path: path };
+                
+                path.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    deselectConnector();
+                    selectedConnector = connectorData;
+                    path.classList.add('selected');
+                });
+
+                connectors.push(connectorData);
+                updateAllConnectors();
+            }
+
+
+            // --- Project Management (Sidebar) ---
+            function updateProjectTitle(name) {
+                currentProjectName = name;
+                projectTitle.textContent = name || 'Unsaved Project';
+            }
+
+            function clearCanvas() {
+                boxes.forEach(b => b.element.remove());
+                connectors.forEach(c => c.path.remove());
+                boxes = []; connectors = []; selectedConnector = null; nextBoxId = 0;
+            }
+
+            function saveState() {
+                showInputModal('Save Project', currentProjectName || 'Enter project name...', (projectName) => {
+                    if (!projectName) {
+                        showToast('Save cancelled. Project name is required.', 'warning');
+                        return;
+                    }
+                    const state = {
+                        boxes: boxes.map(b => ({ id: b.id, x: b.x, y: b.y, contentHTML: b.element.querySelector('.content-container').innerHTML, borderColor: b.element.style.borderColor })),
+                        connectors: connectors.map(c => ({ start: c.start, end: c.end })),
+                        nextBoxId: nextBoxId
+                    };
+                    let allProjects = JSON.parse(localStorage.getItem('projectMapperProjects')) || {};
+                    allProjects[projectName] = state;
+                    localStorage.setItem('projectMapperProjects', JSON.stringify(allProjects));
+                    updateProjectTitle(projectName);
+                    populateSidebar();
+                    showToast(`Project "${projectName}" Saved!`, 'success');
+                });
+            }
+
+            function loadState(projectName) {
+                let allProjects = JSON.parse(localStorage.getItem('projectMapperProjects')) || {};
+                const state = allProjects[projectName];
+                if (state) {
+                    clearCanvas();
+                    nextBoxId = state.nextBoxId || 0;
+                    state.boxes.forEach(b => createBox(b.x, b.y, b.id, b.contentHTML, b.borderColor));
+                    state.connectors.forEach(c => createConnector(c.start, c.end));
+                    updateAllConnectors();
+                    updateProjectTitle(projectName);
+                    showToast(`Project "${projectName}" Loaded!`, 'info');
+                } else {
+                    showToast(`Could not find project "${projectName}".`, 'error');
+                }
+            }
+            
+            function deleteProject(projectName) {
+                if (confirm(`Are you sure you want to delete "${projectName}"? This cannot be undone.`)) {
+                    let allProjects = JSON.parse(localStorage.getItem('projectMapperProjects')) || {};
+                    delete allProjects[projectName];
+                    localStorage.setItem('projectMapperProjects', JSON.stringify(allProjects));
+                    if (currentProjectName === projectName) {
+                        clearCanvas();
+                        updateProjectTitle(null);
+                        createBox(200, 150); // Add a default box to the new unsaved project
+                    }
+                    populateSidebar();
+                    showToast(`Project "${projectName}" deleted.`, 'info');
+                }
+            }
+            
+            function populateSidebar() {
+                let allProjects = JSON.parse(localStorage.getItem('projectMapperProjects')) || {};
+                const projectNames = Object.keys(allProjects);
+                projectList.innerHTML = '';
+                if (projectNames.length === 0) {
+                    projectList.innerHTML = '<li class="text-gray-400 p-2">No saved projects.</li>';
+                    return;
+                }
+                projectNames.forEach(name => {
+                    const li = document.createElement('li');
+                    li.className = 'flex justify-between items-center p-2 rounded-md hover:bg-white/10 cursor-pointer';
+                    li.innerHTML = `<span>${name}</span><button class="delete-project-btn p-1 text-gray-400 hover:text-red-500"><i data-lucide="trash-2" class="w-4 h-4"></i></button>`;
+                    li.addEventListener('click', (e) => {
+                        if (!e.target.closest('.delete-project-btn')) {
+                            loadState(name);
+                            sidebar.classList.add('-translate-x-full');
+                        }
+                    });
+                    li.querySelector('.delete-project-btn').addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        deleteProject(name);
+                    });
+                    projectList.appendChild(li);
+                });
+                lucide.createIcons({ nodes: projectList.querySelectorAll('.delete-project-btn') });
+            }
+
+            sidebarToggle.addEventListener('click', () => sidebar.classList.toggle('-translate-x-full'));
+            
+            function showToast(message, type = 'info') {
+                const colors = { success: 'bg-green-500', info: 'bg-blue-500', warning: 'bg-yellow-500', error: 'bg-red-500' };
+                const toast = document.createElement('div');
+                toast.className = `toast text-white px-4 py-2 rounded-md shadow-lg ${colors[type]}`;
+                toast.textContent = message;
+                document.getElementById('toast-container').appendChild(toast);
+                setTimeout(() => toast.remove(), 3000);
+            }
+
+            // --- Event Listeners ---
+            addBoxBtn.addEventListener('click', () => createBox(canvas.clientWidth / 2 - 128, canvas.clientHeight / 2 - 60));
+            newBtn.addEventListener('click', () => {
+                if (confirm('Are you sure you want to start a new project? Any unsaved changes will be lost.')) {
+                    clearCanvas();
+                    updateProjectTitle(null);
+                    createBox(200, 150);
+                    showToast('New project started.', 'info');
+                }
+            });
+            saveBtn.addEventListener('click', saveState);
+            document.addEventListener('mousemove', e => { mousePos = {x:e.clientX, y:e.clientY}; });
+            document.addEventListener('mouseup', e => { 
+                if(isDragging){
+                    dragTarget.classList.remove('cursor-grabbing');
+                    isDragging=false;
+                    dragTarget=null;
+                } 
+                if(isConnecting){
+                    if(tempLine)tempLine.remove();
+                    tempLine=null;
+                    const endTarget=e.target;
+                    if(endTarget.classList.contains('connector-point')){
+                        const endBox=endTarget.closest('.node-box');
+                        const endId=parseInt(endBox.id.split('-')[1]);
+                        if(startConnector.boxId!==endId){
+                            const endConn={boxId:endId,point:getPointPosition(endTarget)};
+                            createConnector(startConnector,endConn);
+                        }
+                    }
+                    isConnecting=false;
+                    startConnector=null;
+                } 
+            });
+            canvas.addEventListener('click', deselectConnector);
+            document.addEventListener('keydown', e => { 
+                if((e.key==='Delete'||e.key==='Backspace')&&selectedConnector){
+                    const i=connectors.indexOf(selectedConnector);
+                    if(i>-1)connectors.splice(i,1);
+                    selectedConnector.path.remove();
+                    selectedConnector=null;
+                    showToast('Connector deleted','info');
+                } 
+            });
+
+            // --- Initial Load ---
+            setupColorPalette();
+            populateSidebar();
+            if (boxes.length === 0) {
+                createBox(200, 150);
+            }
+        });
+    </script>
+</body>
+</html>
